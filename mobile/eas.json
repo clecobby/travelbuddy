@@ -1,0 +1,16 @@
+{
+  "cli": { "version": ">= 16.0.0", "appVersionSource": "remote" },
+  "build": {
+    "dev": {
+      "channel": "dev",
+      "distribution": "internal",
+      "env": { "EXPO_PUBLIC_API_URL": "https://bxxv47fwrrdmlyqy5nmjvekymq0fojvf.lambda-url.us-east-1.on.aws" },
+      "android": { "buildType": "apk" }
+    },
+    "production": {
+      "channel": "prod",
+      "autoIncrement": true
+    }
+  },
+  "submit": { "production": {} }
+}
