@@ -43,3 +43,16 @@ export function useTripRoute(tripId: string | null, fix: Fix | null) {
   if (!tripId) return [];
   return [...(saved?.tripId === tripId ? saved.points : []), ...(trail.tripId === tripId ? trail.points : [])];
 }
+
+// Length of a route in meters (for the live distance readout).
+export function routeMeters(route: RoutePoint[]) {
+  let total = 0;
+  const rad = Math.PI / 180;
+  for (let i = 1; i < route.length; i++) {
+    const a = route[i - 1], b = route[i];
+    const dLat = (b.latitude - a.latitude) * rad, dLng = (b.longitude - a.longitude) * rad;
+    const h = Math.sin(dLat / 2) ** 2 + Math.cos(a.latitude * rad) * Math.cos(b.latitude * rad) * Math.sin(dLng / 2) ** 2;
+    total += 2 * 6371000 * Math.asin(Math.sqrt(h));
+  }
+  return total;
+}

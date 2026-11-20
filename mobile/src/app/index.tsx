@@ -9,7 +9,7 @@ import { colors } from '@/lib/theme';
 import { useLocation, type Fix } from '@/lib/useLocation';
 import { useTripRecorder, VIDEO_BITRATE } from '@/lib/useTripRecorder';
 import { useVoice } from '@/lib/useVoice';
-import { useTripRoute } from '@/lib/useTripRoute';
+import { routeMeters, useTripRoute } from '@/lib/useTripRoute';
 import { startBackgroundTracking, stopBackgroundTracking, type BackgroundState } from '@/lib/backgroundTrack';
 import { RouteMap } from '@/components/RouteMap';
 import { onUploadState } from '@/lib/uploads';
@@ -45,7 +45,6 @@ export default function Companion() {
 
   const camera = useRef<CameraView>(null);
   const [background, setBackground] = useState<BackgroundState | null>(null);
-  const [mapOpen, setMapOpen] = useState(true);
   // When background tracking runs, it uploads the route itself; otherwise the foreground watcher does.
   const { fix, place, area, error: locError } = useLocation(trip && background !== 'on' ? trip.id : null);
   const route = useTripRoute(trip?.id ?? null, fix);
@@ -186,32 +185,19 @@ export default function Companion() {
           ? 'Hands-free paused'
           : 'Hold the mic to talk';
 
+  const km = routeMeters(route) / 1000;
+  const kmh = fix?.speed != null && fix.speed > 0.5 ? Math.round(fix.speed * 3.6) : 0;
+
   return (
     <View style={s.root}>
-      {showCamera && camPerm?.granted ? (
-        <CameraView
-          ref={camera}
-          style={StyleSheet.absoluteFill}
-          facing="back"
-          mode={trip ? 'video' : 'picture'}
-          mute // the mic belongs to the voice assistant; video clips are silent
-          videoQuality="720p"
-          videoBitrate={VIDEO_BITRATE}
-          onCameraReady={() => setCameraReady(true)}
-          onMountError={(e) => setLines((l) => [...l, { from: 'buddy', text: `Camera error: ${e.message}` }])}
-        />
-      ) : (
-        <View style={[StyleSheet.absoluteFill, s.noCam]} />
-      )}
-
       <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
-        {/* Top bar: where you are + trip status */}
+        {/* Top bar: where you are */}
         <View style={[s.top, { paddingTop: insets.top + 8 }]}>
           <View style={{ flex: 1 }}>
             <Text style={s.brand}>
               travel<Text style={{ color: colors.accent }}>buddy</Text>
             </Text>
-            <Text style={s.place} numberOfLines={2}>
+            <Text style={s.place} numberOfLines={1}>
               {place ?? locError ?? (fix ? 'Finding the address…' : 'Finding you…')}
             </Text>
           </View>
@@ -222,48 +208,76 @@ export default function Companion() {
           </Link>
         </View>
 
-        {trip && (
-          <Pressable style={s.recBar} onPress={() => setMapOpen(!mapOpen)}>
-            <View style={[s.dot, { opacity: recording ? 1 : 0.4 }]} />
-            <Text style={s.recText} numberOfLines={1}>
-              {trip.title} · {elapsed(trip.started_at)} · {clips} clips
-              {uploads.queued ? ` · ${uploads.queued} uploading` : ''} · {(uploads.uploadedBytes / 1e6).toFixed(0)} MB saved
-            </Text>
-            <Text style={s.recText}>{mapOpen ? '▴ map' : '▾ map'}</Text>
-          </Pressable>
-        )}
-        {trip && mapOpen && <RouteMap route={route} live style={s.liveMap} />}
-        {trip && (background === 'expo-go' || background === 'no-permission') && (
-          <Text style={s.warn}>
-            {background === 'expo-go'
-              ? 'Route tracking pauses if you lock the phone (Expo Go). The full app keeps tracking in the background.'
-              : 'Allow location "Always" in Settings to keep mapping the trip while the phone is locked.'}
-          </Text>
-        )}
-        {uploads.lastError && <Text style={s.warn}>Upload problem: {uploads.lastError} (retrying)</Text>}
+        {/* Top half: what you see (camera) with the conversation over it */}
+        <View style={s.pane}>
+          {showCamera && camPerm?.granted ? (
+            <CameraView
+              ref={camera}
+              style={StyleSheet.absoluteFill}
+              facing="back"
+              mode={trip ? 'video' : 'picture'}
+              mute // the mic belongs to the voice assistant; video clips are silent
+              videoQuality="720p"
+              videoBitrate={VIDEO_BITRATE}
+              onCameraReady={() => setCameraReady(true)}
+              onMountError={(e) => setLines((l) => [...l, { from: 'buddy', text: `Camera error: ${e.message}` }])}
+            />
+          ) : (
+            <View style={[StyleSheet.absoluteFill, s.noCam]} />
+          )}
 
-        {/* Conversation */}
-        <ScrollView style={{ flex: 1 }} contentContainerStyle={s.lines} ref={(r) => r?.scrollToEnd({ animated: true })}>
-          {lines.length === 0 && (
-            <Text style={s.hint}>
-              Ask me about where you are, or say “travel buddy, start recording this trip”.
+          {trip && (
+            <View style={s.recBar}>
+              <View style={[s.dot, { opacity: recording ? 1 : 0.4 }]} />
+              <Text style={s.recText} numberOfLines={1}>
+                {trip.title} · {clips} clips{uploads.queued ? ` · ${uploads.queued} uploading` : ''} · {(uploads.uploadedBytes / 1e6).toFixed(0)} MB saved
+              </Text>
+            </View>
+          )}
+          {uploads.lastError && <Text style={s.warn}>Upload problem: {uploads.lastError} (retrying)</Text>}
+
+          <ScrollView style={{ flex: 1 }} contentContainerStyle={s.lines} ref={(r) => r?.scrollToEnd({ animated: true })}>
+            {lines.length === 0 && (
+              <Text style={s.hint}>Ask me about where you are, or say “travel buddy, start recording this trip”.</Text>
+            )}
+            {lines.slice(-6).map((l, i) => (
+              <View key={i} style={[s.bubble, l.from === 'you' ? s.you : l.from === 'place' ? s.placeTag : s.buddy]}>
+                <Text style={s.bubbleText}>{l.text}</Text>
+              </View>
+            ))}
+            {!!voice.partial && (
+              <View style={[s.bubble, s.you, { opacity: 0.6 }]}>
+                <Text style={s.bubbleText}>{voice.partial}</Text>
+              </View>
+            )}
+            {thinking && <ActivityIndicator color={colors.accent} style={{ alignSelf: 'flex-start', margin: 8 }} />}
+          </ScrollView>
+        </View>
+
+        {/* Bottom half: the map, your route filling in as you go */}
+        <View style={s.pane}>
+          <RouteMap
+            route={route}
+            live
+            follow={fix ? { latitude: fix.lat, longitude: fix.lng, heading: fix.heading, speed: fix.speed } : null}
+            style={StyleSheet.absoluteFill}
+          />
+          <View style={s.stats} pointerEvents="none">
+            <Stat value={trip ? km.toFixed(km < 10 ? 2 : 1) : '–'} unit="km" />
+            <Stat value={trip ? elapsed(trip.started_at) : '–'} unit="time" />
+            <Stat value={String(kmh)} unit="km/h" />
+          </View>
+          {trip && (background === 'expo-go' || background === 'no-permission') && (
+            <Text style={[s.warn, s.mapNote]}>
+              {background === 'expo-go'
+                ? 'Route pauses while the phone is locked in Expo Go. The full app keeps tracking.'
+                : 'Allow location "Always" in Settings to keep mapping while the phone is locked.'}
             </Text>
           )}
-          {lines.slice(-8).map((l, i) => (
-            <View key={i} style={[s.bubble, l.from === 'you' ? s.you : l.from === 'place' ? s.placeTag : s.buddy]}>
-              <Text style={s.bubbleText}>{l.text}</Text>
-            </View>
-          ))}
-          {!!voice.partial && (
-            <View style={[s.bubble, s.you, { opacity: 0.6 }]}>
-              <Text style={s.bubbleText}>{voice.partial}</Text>
-            </View>
-          )}
-          {thinking && <ActivityIndicator color={colors.accent} style={{ alignSelf: 'flex-start', margin: 8 }} />}
-        </ScrollView>
+        </View>
 
         {/* Controls */}
-        <View style={[s.controls, { paddingBottom: insets.bottom + 12 }]}>
+        <View style={[s.controls, { paddingBottom: insets.bottom + 10 }]}>
           <Text style={s.status}>{voice.error ?? status}</Text>
           <View style={s.row}>
             {voice.supportsHandsFree && (
@@ -298,6 +312,15 @@ export default function Companion() {
   );
 }
 
+function Stat({ value, unit }: { value: string; unit: string }) {
+  return (
+    <View style={s.stat}>
+      <Text style={s.statValue}>{value}</Text>
+      <Text style={s.statUnit}>{unit}</Text>
+    </View>
+  );
+}
+
 function Chip({ label, on, rec, disabled, onPress }: { label: string; on: boolean; rec?: boolean; disabled?: boolean; onPress: () => void }) {
   return (
     <Pressable
@@ -319,17 +342,22 @@ const s = StyleSheet.create({
   pill: { borderWidth: 1, borderColor: colors.line, borderRadius: 999, paddingHorizontal: 14, paddingVertical: 7, marginTop: 4 },
   pillText: { color: colors.text, fontWeight: '600' },
   recBar: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 16, paddingVertical: 8, backgroundColor: 'rgba(255,69,58,0.18)' },
-  liveMap: { height: 190, marginHorizontal: 12, marginTop: 8 },
+  pane: { flex: 1, overflow: 'hidden', borderTopWidth: 1, borderColor: colors.line },
+  stats: { position: 'absolute', left: 12, right: 12, top: 10, flexDirection: 'row', gap: 8 },
+  stat: { flex: 1, backgroundColor: colors.overlay, borderRadius: 12, paddingVertical: 6, alignItems: 'center' },
+  statValue: { color: colors.text, fontSize: 20, fontWeight: '800', fontVariant: ['tabular-nums'] },
+  statUnit: { color: colors.muted, fontSize: 11, fontWeight: '600', textTransform: 'uppercase' },
+  mapNote: { position: 'absolute', left: 12, right: 12, bottom: 10, borderRadius: 10 },
   dot: { width: 10, height: 10, borderRadius: 5, backgroundColor: colors.rec },
   recText: { color: colors.text, fontSize: 13, fontWeight: '600', flex: 1 },
   warn: { color: '#ffd60a', fontSize: 12, paddingHorizontal: 16, paddingVertical: 4, backgroundColor: colors.overlay },
-  lines: { padding: 16, gap: 8, flexGrow: 1, justifyContent: 'flex-end' },
+  lines: { padding: 12, gap: 6, flexGrow: 1, justifyContent: 'flex-end' },
   hint: { color: colors.text, fontSize: 16, textAlign: 'center', opacity: 0.8, backgroundColor: colors.overlay, padding: 14, borderRadius: 14 },
   bubble: { maxWidth: '85%', borderRadius: 18, paddingHorizontal: 14, paddingVertical: 10 },
   you: { alignSelf: 'flex-end', backgroundColor: 'rgba(61,220,151,0.85)' },
   buddy: { alignSelf: 'flex-start', backgroundColor: colors.overlay, borderWidth: 1, borderColor: colors.line },
   placeTag: { alignSelf: 'center', backgroundColor: colors.overlay, paddingVertical: 5 },
-  bubbleText: { color: colors.text, fontSize: 16, lineHeight: 22 },
+  bubbleText: { color: colors.text, fontSize: 15, lineHeight: 21 },
   controls: { paddingHorizontal: 16, paddingTop: 10, gap: 10, backgroundColor: colors.overlay },
   status: { color: colors.muted, textAlign: 'center', fontSize: 13 },
   row: { flexDirection: 'row', gap: 8, alignItems: 'center', justifyContent: 'center' },

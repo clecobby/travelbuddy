@@ -8,5 +8,6 @@ export const colors = {
   accent: '#3ddc97', // buddy green
   accentSoft: 'rgba(61,220,151,0.15)',
   rec: '#ff453a',
+  route: '#ff7a1a', // the trail drawn on the map
   overlay: 'rgba(11,13,16,0.72)',
 };

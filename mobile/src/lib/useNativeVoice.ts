@@ -37,6 +37,11 @@ export function useNativeVoice({ onCommand }: { onCommand: (text: string) => voi
   const [error, setError] = useState<string | null>(null);
 
   const mode = useRef<Mode>('idle');
+  // 'starting' between start() and the recognizer's 'start' event. An 'end' arriving then belongs to the
+  // session we just aborted (e.g. hands-free listening) and must not cancel the new one.
+  const session = useRef<'none' | 'starting' | 'running'>('none');
+  const holding = useRef(false); // finger is on the mic button
+  const delivered = useRef(false); // this push-to-talk session already sent its text
   const handsFreeRef = useRef(false);
   const speakingRef = useRef(false);
   const transcript = useRef('');
@@ -54,10 +59,14 @@ export function useNativeVoice({ onCommand }: { onCommand: (text: string) => voi
       setError('Microphone or speech permission is off.');
       return;
     }
+    if (m === 'push' && !holding.current) return; // released before we got going
     mode.current = m;
+    session.current = 'starting';
+    delivered.current = false;
     transcript.current = '';
-    setPartial('');
-    ExpoSpeechRecognitionModule.start({ ...recognitionOptions, continuous: m === 'wake' });
+    setPartial(m === 'push' ? '…' : '');
+    // Push-to-talk is continuous too, so a pause mid-sentence doesn't end it; releasing the button does.
+    ExpoSpeechRecognitionModule.start({ ...recognitionOptions, continuous: true });
   }, []);
 
   const stop = useCallback(() => {
@@ -102,27 +111,45 @@ export function useNativeVoice({ onCommand }: { onCommand: (text: string) => voi
     deliver(command);
   }, [deliver, resumeWake, stop]);
 
-  useSpeechRecognitionEvent('start', () => setListening(true));
+  // Send what push-to-talk heard (once), or say we heard nothing.
+  const finishPush = useCallback(() => {
+    mode.current = 'idle';
+    if (delivered.current) return;
+    delivered.current = true;
+    if (transcript.current.trim()) deliver(transcript.current);
+    else {
+      setPartial('');
+      setError("I didn't catch that. Hold the mic while you talk.");
+      setTimeout(resumeWake, 300); // no reply coming, so go back to hands-free listening if it's on
+    }
+  }, [deliver, resumeWake]);
+
+  useSpeechRecognitionEvent('start', () => {
+    if (session.current === 'starting') session.current = 'running';
+    setListening(true);
+  });
   useSpeechRecognitionEvent('end', () => {
+    if (session.current === 'starting') return; // the previous, aborted session ending
+    session.current = 'none';
     setListening(false);
     if (mode.current === 'wake') {
       mode.current = 'idle';
       setTimeout(resumeWake, 300); // iOS ends continuous sessions after about a minute
     } else if (mode.current === 'push') {
-      mode.current = 'idle';
+      finishPush(); // ended without a final result (released, or the OS cut it off)
     }
   });
   useSpeechRecognitionEvent('result', (e) => {
     const text = e.results[0]?.transcript ?? '';
-    transcript.current = text;
     if (mode.current === 'push') {
-      setPartial(text);
-      if (e.isFinal) {
-        mode.current = 'idle';
-        deliver(text);
+      if (text) {
+        transcript.current = text;
+        setPartial(text);
       }
+      if (e.isFinal && !holding.current) finishPush();
       return;
     }
+    transcript.current = text;
     if (mode.current === 'wake') {
       const inFollowUp = Date.now() < followUpUntil.current;
       if (WAKE.test(text) || inFollowUp) setPartial(text.replace(WAKE, ''));
@@ -131,7 +158,16 @@ export function useNativeVoice({ onCommand }: { onCommand: (text: string) => voi
     }
   });
   useSpeechRecognitionEvent('error', (e) => {
-    if (e.error === 'aborted' || e.error === 'no-speech') return;
+    if (session.current === 'starting' && e.error !== 'aborted') session.current = 'none'; // new session failed to start
+    if (e.error === 'aborted') return;
+    if (e.error === 'no-speech') {
+      if (mode.current === 'push') finishPush();
+      return;
+    }
+    if (mode.current === 'push') {
+      mode.current = 'idle';
+      setPartial('');
+    }
     setError(e.message || e.error);
   });
 
@@ -155,14 +191,18 @@ export function useNativeVoice({ onCommand }: { onCommand: (text: string) => voi
   }, [speak]);
 
   const pushToTalk = useCallback(async () => {
+    holding.current = true;
     setError(null);
     if (speakingRef.current) await Speech.stop();
     if (mode.current !== 'idle') stop();
     await start('push');
-  }, [start, stop]);
+    if (mode.current === 'idle') resumeWake(); // released before recognition started
+  }, [resumeWake, start, stop]);
 
   const finishPushToTalk = useCallback(() => {
-    if (mode.current === 'push') ExpoSpeechRecognitionModule.stop(); // emits a final result
+    holding.current = false;
+    // Stopping (not aborting) makes iOS send the final transcript, then 'end'.
+    if (mode.current === 'push') ExpoSpeechRecognitionModule.stop();
   }, []);
 
   const shutUp = useCallback(() => void Speech.stop(), []);

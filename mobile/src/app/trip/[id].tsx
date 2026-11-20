@@ -51,7 +51,7 @@ export default function TripDetail() {
         <Stat label="video" value={`${videos.length} clips · ${videoMb.toFixed(0)} MB`} />
       </View>
       {route.length > 0 ? (
-        <RouteMap route={route} style={{ height: 280 }} />
+        <RouteMap route={route} style={{ height: 280, borderRadius: 14 }} />
       ) : (
         <Text style={s.muted}>No route recorded.</Text>
       )}

@@ -5,3 +5,5 @@ backend/uploads/
 backend/dist/
 .env
 .DS_Store
+
+.claude/settings.local.json

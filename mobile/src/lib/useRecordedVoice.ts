@@ -38,12 +38,14 @@ export function useRecordedVoice({ onCommand }: { onCommand: (text: string) => v
   const [error, setError] = useState<string | null>(null);
   const startedAt = useRef(0);
   const recordingRef = useRef(false);
+  const holding = useRef(false); // finger is on the mic button
   const onCommandRef = useRef(onCommand);
   useEffect(() => {
     onCommandRef.current = onCommand;
   }, [onCommand]);
 
   const pushToTalk = useCallback(async () => {
+    holding.current = true;
     setError(null);
     await Speech.stop();
     if (Platform.OS !== 'ios') return setError('Voice in Expo Go works on iPhone only for now. Type your question instead.');
@@ -51,6 +53,8 @@ export function useRecordedVoice({ onCommand }: { onCommand: (text: string) => v
     if (!perm.granted) return setError('Microphone permission is off.');
     await setAudioModeAsync({ allowsRecording: true, playsInSilentMode: true });
     await recorder.prepareToRecordAsync();
+    // Released while we were getting ready: don't start a recording nobody will stop.
+    if (!holding.current) return void setAudioModeAsync({ allowsRecording: false, playsInSilentMode: true });
     recorder.record();
     recordingRef.current = true;
     startedAt.current = Date.now();
@@ -58,6 +62,7 @@ export function useRecordedVoice({ onCommand }: { onCommand: (text: string) => v
   }, [recorder]);
 
   const finishPushToTalk = useCallback(async () => {
+    holding.current = false;
     if (!recordingRef.current) return;
     recordingRef.current = false;
     setListening(false);
