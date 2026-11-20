@@ -23,7 +23,7 @@ phases:
           export EXPO_PUBLIC_APP_TOKEN=$(aws ssm get-parameter --name "/travelbuddy/$STAGE/app-token" --with-decryption --query Parameter.Value --output text)
           cd mobile && npm ci --no-audit --no-fund \
             && npx tsc --noEmit \
-            && npx --yes eas-cli@latest update --channel "$CHANNEL" --message "$STAGE $(echo "$CODEBUILD_RESOLVED_SOURCE_VERSION" | cut -c1-7)" --non-interactive
+            && npx --yes eas-cli@latest update --channel "$CHANNEL" --environment "$([ "$STAGE" = prod ] && echo production || echo development)" --message "$STAGE $(echo "$CODEBUILD_RESOLVED_SOURCE_VERSION" | cut -c1-7)" --non-interactive
         else
           echo "Skipping the app update (no /travelbuddy/expo-token in SSM, or the API deploy failed)"
         fi
