@@ -4,11 +4,12 @@ import { Image } from 'expo-image';
 import { Stack, useLocalSearchParams } from 'expo-router';
 import { api, type Trip } from '@/lib/api';
 import { colors } from '@/lib/theme';
+import { RouteMap } from '@/components/RouteMap';
 
 type Detail = {
   trip: Trip;
   distance_m: number;
-  points: { t: number; lat: number; lng: number }[];
+  points: { t: number; lat: number; lng: number; accuracy?: number | null }[];
   media: { key: string; kind: 'video' | 'snapshot'; t: number; url: string; bytes: number | null }[];
   conversation: { role: 'user' | 'assistant'; spoken: string; created_at: number }[];
 };
@@ -38,6 +39,7 @@ export default function TripDetail() {
   const minutes = Math.round((end - trip.started_at) / 60000);
   const snaps = media.filter((m) => m.kind === 'snapshot');
   const videos = media.filter((m) => m.kind === 'video');
+  const route = data.points.filter((p) => (p.accuracy ?? 0) <= 100).map((p) => ({ latitude: p.lat, longitude: p.lng }));
   const videoMb = videos.reduce((a, v) => a + (v.bytes ?? 0), 0) / 1e6;
 
   return (
@@ -48,6 +50,11 @@ export default function TripDetail() {
         <Stat label="time" value={minutes >= 60 ? `${Math.floor(minutes / 60)}h ${minutes % 60}m` : `${minutes} min`} />
         <Stat label="video" value={`${videos.length} clips · ${videoMb.toFixed(0)} MB`} />
       </View>
+      {route.length > 0 ? (
+        <RouteMap route={route} style={{ height: 280 }} />
+      ) : (
+        <Text style={s.muted}>No route recorded.</Text>
+      )}
       <Text style={s.muted}>
         {new Date(trip.started_at).toLocaleString()} {trip.status === 'recording' ? '· recording now' : `→ ${new Date(end).toLocaleTimeString()}`}
       </Text>

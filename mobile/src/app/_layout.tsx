@@ -3,6 +3,7 @@ import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import * as Updates from 'expo-updates';
 import { colors } from '@/lib/theme';
+import '@/lib/backgroundTrack'; // defines the background location task before the OS can wake it
 
 // Pull the latest pushed version right at launch so a deploy reaches the phone on the next open,
 // not the one after. Skipped in development builds (they load JS from the dev server instead).

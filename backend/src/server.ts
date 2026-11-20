@@ -46,6 +46,8 @@ app.post('/api/chat', device, async (req, res) => {
   } catch (e) {
     console.error('chat failed', e);
     if (e instanceof Anthropic.RateLimitError) return res.status(429).json({ error: "I'm getting too many questions right now, try again in a moment." });
+    if (e instanceof Anthropic.APIError && /credit balance/i.test(e.message))
+      return res.status(402).json({ error: 'Travel Buddy is out of Anthropic credits. Top up the account at console.anthropic.com.' });
     if (e instanceof Anthropic.AuthenticationError) return res.status(500).json({ error: 'The server has no valid Anthropic API key.' });
     if (e instanceof Anthropic.APIConnectionError) return res.status(502).json({ error: "I can't reach my brain right now. Check the connection." });
     res.status(500).json({ error: 'Something went wrong talking to Travel Buddy.' });

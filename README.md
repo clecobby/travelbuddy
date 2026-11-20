@@ -73,7 +73,7 @@ Trips, GPS points, media records and the conversation live in one DynamoDB table
 
 ## Known limits (MVP)
 
-- **Foreground only.** Recording and GPS stop if you lock the phone or leave the app (the screen is kept awake while it's open). Background location would need `expo-task-manager` and the background-location plugin options.
+- **Background:** with a trip recording, the standalone app keeps mapping the route while the phone is locked (needs "Always" location; iOS shows the blue location pill). Video and voice stop in the background; iOS doesn't allow the camera there. Expo Go can't run background location at all, so there the route pauses while the phone is locked.
 - **Video clips are silent.** The microphone is reserved for talking to Travel Buddy, and sharing it with the video recorder is unreliable on iOS.
 - **About 1 second of footage is lost** between 15-second clips while the camera restarts recording.
 - **No accounts.** A random device id identifies you, and the app token keeps casual strangers out (it ships inside the app, so it isn't a real secret). For real users, add Cognito the way the `dating` app does.

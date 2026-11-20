@@ -55,7 +55,10 @@
       [
         "expo-location",
         {
-          "locationWhenInUsePermission": "Travel Buddy uses your location to tell you about where you are and to map your trips."
+          "locationWhenInUsePermission": "Travel Buddy uses your location to tell you about where you are and to map your trips.",
+          "locationAlwaysAndWhenInUsePermission": "Choose \"Always\" so Travel Buddy keeps mapping your trip while the phone is locked or in your pocket.",
+          "isIosBackgroundLocationEnabled": true,
+          "isAndroidBackgroundLocationEnabled": true
         }
       ],
       [
@@ -69,7 +72,8 @@
       "expo-secure-store",
       "expo-image",
       "expo-web-browser",
-      "expo-audio"
+      "expo-audio",
+      "expo-asset"
     ],
     "experiments": {
       "typedRoutes": true,

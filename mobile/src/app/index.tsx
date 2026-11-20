@@ -9,6 +9,9 @@ import { colors } from '@/lib/theme';
 import { useLocation, type Fix } from '@/lib/useLocation';
 import { useTripRecorder, VIDEO_BITRATE } from '@/lib/useTripRecorder';
 import { useVoice } from '@/lib/useVoice';
+import { useTripRoute } from '@/lib/useTripRoute';
+import { startBackgroundTracking, stopBackgroundTracking, type BackgroundState } from '@/lib/backgroundTrack';
+import { RouteMap } from '@/components/RouteMap';
 import { onUploadState } from '@/lib/uploads';
 
 type Line = { from: 'you' | 'buddy' | 'place'; text: string };
@@ -41,7 +44,23 @@ export default function Companion() {
   const [, tick] = useState(0);
 
   const camera = useRef<CameraView>(null);
-  const { fix, place, area, error: locError } = useLocation(trip?.id ?? null);
+  const [background, setBackground] = useState<BackgroundState | null>(null);
+  const [mapOpen, setMapOpen] = useState(true);
+  // When background tracking runs, it uploads the route itself; otherwise the foreground watcher does.
+  const { fix, place, area, error: locError } = useLocation(trip && background !== 'on' ? trip.id : null);
+  const route = useTripRoute(trip?.id ?? null, fix);
+
+  // A recording trip keeps mapping the route with the screen locked (standalone app, "Always" location).
+  useEffect(() => {
+    if (!trip?.id) {
+      setBackground(null);
+      void stopBackgroundTracking().catch(() => {});
+      return;
+    }
+    startBackgroundTracking(trip.id)
+      .then(setBackground)
+      .catch(() => setBackground('off'));
+  }, [trip?.id]);
   const [guide, setGuide] = useState(true); // speak up on arriving somewhere new
   const announced = useRef<string | null>(null);
   const fixRef = useRef<Fix | null>(null);
@@ -204,13 +223,22 @@ export default function Companion() {
         </View>
 
         {trip && (
-          <View style={s.recBar}>
+          <Pressable style={s.recBar} onPress={() => setMapOpen(!mapOpen)}>
             <View style={[s.dot, { opacity: recording ? 1 : 0.4 }]} />
             <Text style={s.recText} numberOfLines={1}>
               {trip.title} · {elapsed(trip.started_at)} · {clips} clips
               {uploads.queued ? ` · ${uploads.queued} uploading` : ''} · {(uploads.uploadedBytes / 1e6).toFixed(0)} MB saved
             </Text>
-          </View>
+            <Text style={s.recText}>{mapOpen ? '▴ map' : '▾ map'}</Text>
+          </Pressable>
+        )}
+        {trip && mapOpen && <RouteMap route={route} live style={s.liveMap} />}
+        {trip && (background === 'expo-go' || background === 'no-permission') && (
+          <Text style={s.warn}>
+            {background === 'expo-go'
+              ? 'Route tracking pauses if you lock the phone (Expo Go). The full app keeps tracking in the background.'
+              : 'Allow location "Always" in Settings to keep mapping the trip while the phone is locked.'}
+          </Text>
         )}
         {uploads.lastError && <Text style={s.warn}>Upload problem: {uploads.lastError} (retrying)</Text>}
 
@@ -291,6 +319,7 @@ const s = StyleSheet.create({
   pill: { borderWidth: 1, borderColor: colors.line, borderRadius: 999, paddingHorizontal: 14, paddingVertical: 7, marginTop: 4 },
   pillText: { color: colors.text, fontWeight: '600' },
   recBar: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 16, paddingVertical: 8, backgroundColor: 'rgba(255,69,58,0.18)' },
+  liveMap: { height: 190, marginHorizontal: 12, marginTop: 8 },
   dot: { width: 10, height: 10, borderRadius: 5, backgroundColor: colors.rec },
   recText: { color: colors.text, fontSize: 13, fontWeight: '600', flex: 1 },
   warn: { color: '#ffd60a', fontSize: 12, paddingHorizontal: 16, paddingVertical: 4, backgroundColor: colors.overlay },
