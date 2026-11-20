@@ -17,7 +17,7 @@ phases:
     commands:
       - |
         if [ "$CODEBUILD_BUILD_SUCCEEDING" = 1 ] && EXPO_TOKEN=$(aws ssm get-parameter --name /travelbuddy/expo-token --with-decryption --query Parameter.Value --output text 2>/dev/null); then
-          export EXPO_TOKEN EXPO_PUBLIC_API_URL="$API_URL"
+          export EXPO_TOKEN EXPO_PUBLIC_API_URL="$API_URL" EAS_NO_VCS=1 # the pipeline source is a zip without .git
           export EXPO_PUBLIC_APP_TOKEN=$(aws ssm get-parameter --name "/travelbuddy/$STAGE/app-token" --with-decryption --query Parameter.Value --output text)
           cd mobile && npm ci --no-audit --no-fund \
             && npx tsc --noEmit \
