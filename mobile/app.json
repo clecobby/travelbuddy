@@ -68,7 +68,8 @@
       "expo-video",
       "expo-secure-store",
       "expo-image",
-      "expo-web-browser"
+      "expo-web-browser",
+      "expo-audio"
     ],
     "experiments": {
       "typedRoutes": true,
@@ -86,7 +87,7 @@
     },
     "owner": "clecobby",
     "runtimeVersion": {
-      "policy": "appVersion"
+      "policy": "sdkVersion"
     },
     "updates": {
       "url": "https://u.expo.dev/03e9de96-d877-4402-b0e9-369bdf66ba44",

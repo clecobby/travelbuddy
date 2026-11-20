@@ -238,7 +238,9 @@ export default function Companion() {
         <View style={[s.controls, { paddingBottom: insets.bottom + 12 }]}>
           <Text style={s.status}>{voice.error ?? status}</Text>
           <View style={s.row}>
-            <Chip label={voice.handsFree ? 'Hands-free' : 'Hands-free off'} on={voice.handsFree} onPress={() => voice.setHandsFree(!voice.handsFree)} />
+            {voice.supportsHandsFree && (
+              <Chip label={voice.handsFree ? 'Hands-free' : 'Hands-free off'} on={voice.handsFree} onPress={() => voice.setHandsFree(!voice.handsFree)} />
+            )}
             <Chip label={guide ? 'Guide' : 'Guide off'} on={guide} onPress={() => setGuide(!guide)} />
             <Chip label={showCamera ? 'Camera on' : 'Camera off'} on={showCamera} onPress={toggleCamera} disabled={!!trip} />
             <Chip label={trip ? '■ Stop trip' : '● Record trip'} on={!!trip} rec onPress={toggleTrip} />

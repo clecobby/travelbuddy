@@ -8,44 +8,57 @@ A voice travel companion. Point your phone's camera at the road and talk to it:
 
 ```
 mobile/    iOS + Android app: Expo SDK 58, Expo Router, TypeScript
-backend/   Express + SQLite (node:sqlite) in TypeScript, run directly by Node 26 (no build step) → http://localhost:4100
+backend/   Express API in TypeScript → AWS Lambda (Function URL) + DynamoDB + S3 + Amazon Transcribe
+deploy/    AWS setup script, CodeBuild spec, manual deploy script
 ```
 
-## Run it
+## Open it on your phone (Expo Go)
+
+Install **Expo Go**, sign in as `clecobby`, and open the project's **dev** channel from
+https://expo.dev/accounts/clecobby/projects/travelbuddy/updates (tap the latest update → Preview → scan the QR code).
+Every push to `dev` publishes a new version; Expo Go picks it up the next time you open the project.
+
+In Expo Go you **hold the mic to talk** (the clip is transcribed by Amazon Transcribe on the server, iPhone only for now).
+The hands-free "travel buddy, ..." wake word needs on-device speech recognition, which only the standalone build has
+(`npx expo run:ios --configuration Release --device`; it updates itself from the same channel).
+
+## Branches and deploys
+
+| Push to | Pipeline | API | App updates (Expo channel) |
+|---|---|---|---|
+| `dev` | `travelbuddy-dev` | `travelbuddy-api-dev` | `dev` |
+| `main` | `travelbuddy-prod` | `travelbuddy-api-prod` | `prod` |
+
+`git push` sends to GitHub and CodeCommit at once (`origin` has both push URLs). CodeCommit starts the pipeline, which
+type-checks and deploys the API to Lambda, then publishes the app's JavaScript with `eas update`.
+Changes to native code (new native modules, permissions, app.json plugins) need a new build, not just an update.
+
+Secrets live in SSM Parameter Store: `/travelbuddy/anthropic-key` (copied into the Lambdas by `deploy/bootstrap-aws.sh <stage>`),
+`/travelbuddy/<stage>/app-token` (generated; the API requires it and the app ships with it), `/travelbuddy/expo-token` (lets CodeBuild publish updates).
+Re-run `deploy/bootstrap-aws.sh dev|prod` after changing the Anthropic key or the infrastructure; it only creates what's missing.
+
+## Run the API locally (optional)
 
 ```bash
-# 1. Backend
-cd backend
-cp .env.example .env          # add ANTHROPIC_API_KEY; MEDIA_BUCKET optional (see below)
-npm install && npm run dev
-
-# 2. Phone app: needs a development build (speech recognition is a native module that Expo Go doesn't include)
-cd mobile
-npm install
-npx expo run:ios --device     # or: npx expo run:android --device / eas build --profile development
+cd backend && cp .env.example .env   # uses the dev table and bucket; needs AWS credentials
+npm install && npm run dev           # http://localhost:4100
 ```
 
-Your phone must be on the same Wi-Fi as your computer. The app finds the backend on the machine serving the JS bundle.
-To use a deployed backend, set `EXPO_PUBLIC_API_URL` in `mobile/.env`. If the backend has `APP_TOKEN` set, put the same value in `EXPO_PUBLIC_APP_TOKEN`.
+## Storage
 
-Without `MEDIA_BUCKET`, uploads go to `backend/uploads/`, which is good enough for trying it out.
-
-## Storage on S3
-
-Set `MEDIA_BUCKET` (and `AWS_REGION`) in `backend/.env`. The server signs short-lived PUT URLs and the phone uploads directly to S3, so video never passes through the server. AWS credentials come from the normal chain (`aws login`, `~/.aws`, or an instance role) and need `s3:PutObject` + `s3:GetObject` on `arn:aws:s3:::<bucket>/trips/*`.
-
-Layout:
+Trip media goes from the phone straight to S3 with presigned PUT URLs (`travelbuddy-media-<stage>-<account>`):
 ```
 trips/<tripId>/video/<ts>-<rand>.mov|mp4     15-second H.264 clips, ~1.2 Mbit/s (~540 MB/hour)
 trips/<tripId>/snapshots/<ts>-<rand>.jpg     last frame of each clip, 1024 px wide, JPEG q60 (~80 KB)
+convos/...                                   conversation turns too big for a DynamoDB item
 ```
-GPS points, trip metadata and the conversation live in SQLite (`backend/travelbuddy.db`).
+Trips, GPS points, media records and the conversation live in one DynamoDB table (`travelbuddy-<stage>`, layout in [backend/src/db.ts](backend/src/db.ts)).
 
 ## How it works
 
 | Piece | Where |
 |---|---|
-| Wake word + push-to-talk speech recognition, spoken replies | [mobile/src/lib/useVoice.ts](mobile/src/lib/useVoice.ts) (`expo-speech-recognition`, `expo-speech`) |
+| Voice: wake word + live transcription in the full app, hold-to-talk + server transcription in Expo Go, spoken replies | [mobile/src/lib/useVoice.ts](mobile/src/lib/useVoice.ts), [useNativeVoice.ts](mobile/src/lib/useNativeVoice.ts), [useRecordedVoice.ts](mobile/src/lib/useRecordedVoice.ts), [backend/src/transcribe.ts](backend/src/transcribe.ts) |
 | Clip-by-clip video recording, snapshot extraction, "current view" for the model | [mobile/src/lib/useTripRecorder.ts](mobile/src/lib/useTripRecorder.ts), [frames.ts](mobile/src/lib/frames.ts) |
 | Upload queue with retries (presign → PUT → record) | [mobile/src/lib/uploads.ts](mobile/src/lib/uploads.ts) |
 | GPS tracking, address lookup, batched track upload | [mobile/src/lib/useLocation.ts](mobile/src/lib/useLocation.ts) |
@@ -63,5 +76,5 @@ GPS points, trip metadata and the conversation live in SQLite (`backend/travelbu
 - **Foreground only.** Recording and GPS stop if you lock the phone or leave the app (the screen is kept awake while it's open). Background location would need `expo-task-manager` and the background-location plugin options.
 - **Video clips are silent.** The microphone is reserved for talking to Travel Buddy, and sharing it with the video recorder is unreliable on iOS.
 - **About 1 second of footage is lost** between 15-second clips while the camera restarts recording.
-- **No accounts.** A random device id identifies you. Set `APP_TOKEN` before exposing the server so strangers can't spend your Claude credits. For real users, add Cognito the way the `dating` app does.
+- **No accounts.** A random device id identifies you, and the app token keeps casual strangers out (it ships inside the app, so it isn't a real secret). For real users, add Cognito the way the `dating` app does.
 - The upload queue lives in memory. Clips not yet uploaded when the app is killed stay on the phone's cache but won't be retried.

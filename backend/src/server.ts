@@ -8,6 +8,7 @@ import {
   type Point,
 } from './db.ts';
 import { CONTENT_TYPES, presignUpload, presignView } from './storage.ts';
+import { transcribe } from './transcribe.ts';
 
 export const app = express();
 app.use(cors());
@@ -48,6 +49,18 @@ app.post('/api/chat', device, async (req, res) => {
     if (e instanceof Anthropic.AuthenticationError) return res.status(500).json({ error: 'The server has no valid Anthropic API key.' });
     if (e instanceof Anthropic.APIConnectionError) return res.status(502).json({ error: "I can't reach my brain right now. Check the connection." });
     res.status(500).json({ error: 'Something went wrong talking to Travel Buddy.' });
+  }
+});
+
+// Hold-to-talk for phones without on-device speech recognition: body is a 16-bit mono WAV.
+app.post('/api/transcribe', express.raw({ type: () => true, limit: '4mb' }), device, async (req, res) => {
+  if (!Buffer.isBuffer(req.body) || !req.body.length) return res.status(400).json({ error: 'No audio' });
+  try {
+    res.json({ text: await transcribe(req.body) });
+  } catch (e) {
+    console.error('transcribe failed', e);
+    const bad = (e as Error).message.startsWith('Expected');
+    res.status(bad ? 400 : 502).json({ error: bad ? "That recording format isn't supported." : "I couldn't make out what you said. Try again?" });
   }
 });
 

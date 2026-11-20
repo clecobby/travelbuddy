@@ -67,7 +67,8 @@ ensure_role "$FUNCTION" lambda.amazonaws.com "$(cat <<JSON
 {"Version":"2012-10-17","Statement":[
  {"Effect":"Allow","Action":["logs:CreateLogGroup","logs:CreateLogStream","logs:PutLogEvents"],"Resource":"arn:aws:logs:$AWS_REGION:$ACCOUNT:log-group:/aws/lambda/$FUNCTION*"},
  {"Effect":"Allow","Action":["dynamodb:GetItem","dynamodb:PutItem","dynamodb:UpdateItem","dynamodb:Query","dynamodb:BatchWriteItem"],"Resource":"arn:aws:dynamodb:$AWS_REGION:$ACCOUNT:table/$TABLE"},
- {"Effect":"Allow","Action":["s3:PutObject","s3:GetObject"],"Resource":["arn:aws:s3:::$BUCKET/trips/*","arn:aws:s3:::$BUCKET/convos/*"]}
+ {"Effect":"Allow","Action":["s3:PutObject","s3:GetObject"],"Resource":["arn:aws:s3:::$BUCKET/trips/*","arn:aws:s3:::$BUCKET/convos/*"]},
+ {"Effect":"Allow","Action":"transcribe:StartStreamTranscription","Resource":"*"}
 ]}
 JSON
 )"

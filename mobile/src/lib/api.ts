@@ -24,9 +24,14 @@ export function getDeviceId() {
   return deviceId;
 }
 
-export async function api<T = any>(path: string, { method = 'GET', body }: { method?: string; body?: unknown } = {}): Promise<T> {
+export async function authHeaders(): Promise<Record<string, string>> {
   const headers: Record<string, string> = { 'x-device-id': await getDeviceId() };
   if (APP_TOKEN) headers['x-app-token'] = APP_TOKEN;
+  return headers;
+}
+
+export async function api<T = any>(path: string, { method = 'GET', body }: { method?: string; body?: unknown } = {}): Promise<T> {
+  const headers = await authHeaders();
   if (body !== undefined) headers['Content-Type'] = 'application/json';
   let res: Response;
   try {
