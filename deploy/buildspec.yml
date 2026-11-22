@@ -1,5 +1,5 @@
 # CodeBuild steps for the pipelines travelbuddy-dev (dev branch) and travelbuddy-prod (main branch).
-# STAGE (dev|prod), CHANNEL and API_URL come from the CodeBuild project's environment (deploy/bootstrap-aws.sh).
+# STAGE (dev|prod), CHANNEL, API_URL and COGNITO_CLIENT_ID come from the CodeBuild project's environment (deploy/bootstrap-aws.sh).
 # 1. type-check and deploy the API to Lambda  2. publish the app's JS as an over-the-air update to the Expo channel.
 version: 0.2
 
@@ -20,7 +20,7 @@ phases:
           export EXPO_TOKEN EXPO_PUBLIC_API_URL="$API_URL"
           # The pipeline hands us a zip without .git, but eas-cli insists on a git repo: make a throwaway one.
           git init -q . && git add -A && git -c user.name=ci -c user.email=ci@localhost commit -qm "$CODEBUILD_RESOLVED_SOURCE_VERSION"
-          export EXPO_PUBLIC_APP_TOKEN=$(aws ssm get-parameter --name "/travelbuddy/$STAGE/app-token" --with-decryption --query Parameter.Value --output text)
+          export EXPO_PUBLIC_COGNITO_CLIENT_ID="$COGNITO_CLIENT_ID"
           cd mobile && npm ci --no-audit --no-fund \
             && npx tsc --noEmit \
             && npx --yes eas-cli@latest update --channel "$CHANNEL" --environment "$([ "$STAGE" = prod ] && echo production || echo development)" --message "$STAGE $(echo "$CODEBUILD_RESOLVED_SOURCE_VERSION" | cut -c1-7)" --non-interactive

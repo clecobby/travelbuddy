@@ -4,13 +4,13 @@
 #   deploy/bootstrap-aws.sh prod
 #
 # Per stage:  DynamoDB table travelbuddy-<stage>, S3 bucket travelbuddy-media-<stage>-<account>,
-#             Lambda travelbuddy-api-<stage> with a public Function URL (guarded by the app token),
+#             Lambda travelbuddy-api-<stage> with a public Function URL (requests need a Cognito sign-in),
+#             Cognito user pool travelbuddy-<stage> (email + password accounts),
 #             CodeBuild project + CodePipeline travelbuddy-<stage>, triggered by pushes to its branch on CodeCommit.
 # Shared:     CodeCommit repo travelbuddy, pipeline artifact bucket, pipeline/events roles.
 #
 # Secrets live in SSM Parameter Store:
 #   /travelbuddy/anthropic-key        Anthropic API key (SecureString) - copied into the Lambda's environment on each run
-#   /travelbuddy/<stage>/app-token    generated here; the API requires it and the app ships with it
 #   /travelbuddy/expo-token           Expo access token so CodeBuild can publish over-the-air updates
 set -euo pipefail
 NEW_ROLE=0
@@ -53,12 +53,33 @@ if ! exists aws s3api head-bucket --bucket "$BUCKET"; then
   say "created bucket $BUCKET"
 fi
 
-# ---- secrets ----
-if ! exists aws ssm get-parameter --name "/travelbuddy/$STAGE/app-token"; then
-  aws ssm put-parameter --name "/travelbuddy/$STAGE/app-token" --type SecureString --value "$(openssl rand -hex 24)" >/dev/null
-  say "generated /travelbuddy/$STAGE/app-token"
+# ---- accounts (Cognito) ----
+POOL_ID=$(aws cognito-idp list-user-pools --max-results 60 --query "UserPools[?Name=='travelbuddy-$STAGE'].Id | [0]" --output text)
+if [ "$POOL_ID" = None ] || [ -z "$POOL_ID" ]; then
+  POOL_ID=$(aws cognito-idp create-user-pool --pool-name "travelbuddy-$STAGE" \
+    --username-attributes email --auto-verified-attributes email \
+    --policies 'PasswordPolicy={MinimumLength=10,RequireUppercase=true,RequireLowercase=true,RequireNumbers=true,RequireSymbols=false,TemporaryPasswordValidityDays=3}' \
+    --account-recovery-setting 'RecoveryMechanisms=[{Priority=1,Name=verified_email}]' \
+    --verification-message-template '{"DefaultEmailOption":"CONFIRM_WITH_CODE","EmailSubject":"Your Travel Buddy code","EmailMessage":"Your Travel Buddy code is {####}"}' \
+    --admin-create-user-config AllowAdminCreateUserOnly=false \
+    --user-pool-tier ESSENTIALS --deletion-protection ACTIVE \
+    --query UserPool.Id --output text)
+  say "created user pool travelbuddy-$STAGE ($POOL_ID)"
 fi
-APP_TOKEN=$(aws ssm get-parameter --name "/travelbuddy/$STAGE/app-token" --with-decryption --query Parameter.Value --output text)
+CLIENT_ID=$(aws cognito-idp list-user-pool-clients --user-pool-id "$POOL_ID" --query "UserPoolClients[?ClientName=='travelbuddy-app'].ClientId | [0]" --output text)
+if [ "$CLIENT_ID" = None ] || [ -z "$CLIENT_ID" ]; then
+  # No client secret (it would ship inside the app). Password login goes over TLS to our API, then to Cognito.
+  CLIENT_ID=$(aws cognito-idp create-user-pool-client --user-pool-id "$POOL_ID" --client-name travelbuddy-app --no-generate-secret \
+    --explicit-auth-flows ALLOW_USER_PASSWORD_AUTH \
+    --access-token-validity 60 --id-token-validity 60 --refresh-token-validity 90 \
+    --token-validity-units AccessToken=minutes,IdToken=minutes,RefreshToken=days \
+    --enable-token-revocation --prevent-user-existence-errors ENABLED \
+    --refresh-token-rotation Feature=ENABLED,RetryGracePeriodSeconds=30 \
+    --query UserPoolClient.ClientId --output text)
+  say "created app client $CLIENT_ID"
+fi
+
+# ---- secrets ----
 ANTHROPIC_KEY=$(aws ssm get-parameter --name /travelbuddy/anthropic-key --with-decryption --query Parameter.Value --output text 2>/dev/null || true)
 [ -n "$ANTHROPIC_KEY" ] || echo "! /travelbuddy/anthropic-key is not in SSM yet: chat will fail until you add it and re-run this script"
 
@@ -67,14 +88,16 @@ ensure_role "$FUNCTION" lambda.amazonaws.com "$(cat <<JSON
 {"Version":"2012-10-17","Statement":[
  {"Effect":"Allow","Action":["logs:CreateLogGroup","logs:CreateLogStream","logs:PutLogEvents"],"Resource":"arn:aws:logs:$AWS_REGION:$ACCOUNT:log-group:/aws/lambda/$FUNCTION*"},
  {"Effect":"Allow","Action":["dynamodb:GetItem","dynamodb:PutItem","dynamodb:UpdateItem","dynamodb:Query","dynamodb:BatchWriteItem"],"Resource":"arn:aws:dynamodb:$AWS_REGION:$ACCOUNT:table/$TABLE"},
- {"Effect":"Allow","Action":["s3:PutObject","s3:GetObject"],"Resource":["arn:aws:s3:::$BUCKET/trips/*","arn:aws:s3:::$BUCKET/convos/*"]},
- {"Effect":"Allow","Action":"transcribe:StartStreamTranscription","Resource":"*"}
+ {"Effect":"Allow","Action":["s3:PutObject","s3:GetObject","s3:DeleteObject"],"Resource":["arn:aws:s3:::$BUCKET/trips/*","arn:aws:s3:::$BUCKET/convos/*"]},
+ {"Effect":"Allow","Action":"s3:ListBucket","Resource":"arn:aws:s3:::$BUCKET"},
+ {"Effect":"Allow","Action":"transcribe:StartStreamTranscription","Resource":"*"},
+ {"Effect":"Allow","Action":"cognito-idp:AdminDeleteUser","Resource":"arn:aws:cognito-idp:$AWS_REGION:$ACCOUNT:userpool/$POOL_ID"}
 ]}
 JSON
 )"
 [ "$NEW_ROLE" = 1 ] && sleep 10 # new IAM roles take a moment before Lambda accepts them
 
-ENV="Variables={STAGE=$STAGE,TABLE=$TABLE,MEDIA_BUCKET=$BUCKET,APP_TOKEN=$APP_TOKEN,ANTHROPIC_API_KEY=${ANTHROPIC_KEY:-unset},NODE_OPTIONS=--enable-source-maps}"
+ENV="Variables={STAGE=$STAGE,TABLE=$TABLE,MEDIA_BUCKET=$BUCKET,COGNITO_USER_POOL_ID=$POOL_ID,COGNITO_CLIENT_ID=$CLIENT_ID,ANTHROPIC_API_KEY=${ANTHROPIC_KEY:-unset},NODE_OPTIONS=--enable-source-maps}"
 if ! exists aws lambda get-function --function-name "$FUNCTION"; then
   (cd "$ROOT/backend" && npm ci --no-audit --no-fund --silent && npm run build --silent)
   (cd "$ROOT/backend/dist" && zip -qj /tmp/$FUNCTION.zip lambda.mjs)
@@ -108,7 +131,7 @@ ensure_role "travelbuddy-build-$STAGE" codebuild.amazonaws.com "$(cat <<JSON
  {"Effect":"Allow","Action":["logs:CreateLogGroup","logs:CreateLogStream","logs:PutLogEvents"],"Resource":"arn:aws:logs:$AWS_REGION:$ACCOUNT:log-group:/aws/codebuild/travelbuddy-$STAGE*"},
  {"Effect":"Allow","Action":["s3:GetObject","s3:GetObjectVersion","s3:PutObject"],"Resource":"arn:aws:s3:::$ARTIFACTS/*"},
  {"Effect":"Allow","Action":["lambda:UpdateFunctionCode","lambda:GetFunction","lambda:GetFunctionConfiguration"],"Resource":"arn:aws:lambda:$AWS_REGION:$ACCOUNT:function:$FUNCTION"},
- {"Effect":"Allow","Action":"ssm:GetParameter","Resource":["arn:aws:ssm:$AWS_REGION:$ACCOUNT:parameter/travelbuddy/expo-token","arn:aws:ssm:$AWS_REGION:$ACCOUNT:parameter/travelbuddy/$STAGE/app-token"]}
+ {"Effect":"Allow","Action":"ssm:GetParameter","Resource":["arn:aws:ssm:$AWS_REGION:$ACCOUNT:parameter/travelbuddy/expo-token"]}
 ]}
 JSON
 )"
@@ -126,7 +149,7 @@ JSON
 )"
 [ "$NEW_ROLE" = 1 ] && sleep 10
 
-BUILD_ENV="type=LINUX_CONTAINER,image=aws/codebuild/amazonlinux-x86_64-standard:5.0,computeType=BUILD_GENERAL1_SMALL,environmentVariables=[{name=STAGE,value=$STAGE},{name=CHANNEL,value=$STAGE},{name=API_URL,value=$API_URL}]"
+BUILD_ENV="type=LINUX_CONTAINER,image=aws/codebuild/amazonlinux-x86_64-standard:5.0,computeType=BUILD_GENERAL1_SMALL,environmentVariables=[{name=STAGE,value=$STAGE},{name=CHANNEL,value=$STAGE},{name=API_URL,value=$API_URL},{name=COGNITO_CLIENT_ID,value=$CLIENT_ID}]"
 if [ "$(aws codebuild batch-get-projects --names "travelbuddy-$STAGE" --query 'length(projects)' --output text)" = 0 ]; then
   aws codebuild create-project --name "travelbuddy-$STAGE" --service-role "arn:aws:iam::$ACCOUNT:role/travelbuddy-build-$STAGE" \
     --source type=CODEPIPELINE,buildspec=deploy/buildspec.yml --artifacts type=CODEPIPELINE --environment "$BUILD_ENV" \
@@ -164,4 +187,5 @@ aws events put-targets --rule "travelbuddy-push-$STAGE" --targets \
 echo
 echo "$STAGE ready"
 echo "  API:      $API_URL"
+echo "  accounts: Cognito pool $POOL_ID, app client $CLIENT_ID"
 echo "  branch:   $BRANCH → pipeline travelbuddy-$STAGE → Lambda $FUNCTION + Expo channel $STAGE"

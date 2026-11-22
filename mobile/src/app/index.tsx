@@ -206,6 +206,11 @@ export default function Companion() {
               <Text style={s.pillText}>Trips</Text>
             </Pressable>
           </Link>
+          <Link href="/account" asChild>
+            <Pressable style={s.pill} accessibilityLabel="Account">
+              <Text style={s.pillText}>Me</Text>
+            </Pressable>
+          </Link>
         </View>
 
         {/* Top half: what you see (camera) with the conversation over it */}
@@ -336,7 +341,7 @@ function Chip({ label, on, rec, disabled, onPress }: { label: string; on: boolea
 const s = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.bg },
   noCam: { backgroundColor: colors.bg },
-  top: { flexDirection: 'row', alignItems: 'flex-start', paddingHorizontal: 16, paddingBottom: 10, backgroundColor: colors.overlay, gap: 12 },
+  top: { flexDirection: 'row', alignItems: 'flex-start', paddingHorizontal: 16, paddingBottom: 10, backgroundColor: colors.overlay, gap: 8 },
   brand: { color: colors.text, fontSize: 22, fontWeight: '800', letterSpacing: -0.5 },
   place: { color: colors.muted, fontSize: 13, marginTop: 2 },
   pill: { borderWidth: 1, borderColor: colors.line, borderRadius: 999, paddingHorizontal: 14, paddingVertical: 7, marginTop: 4 },

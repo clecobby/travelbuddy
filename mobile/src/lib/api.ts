@@ -1,33 +1,25 @@
 import Constants from 'expo-constants';
-import * as SecureStore from 'expo-secure-store';
+import { getIdToken } from './cognito';
 
 // EXPO_PUBLIC_API_URL points at a deployed server. Without it, use the backend on the machine serving the JS bundle
 // (works on simulators and on phones on the same Wi-Fi).
 const devHost = Constants.expoConfig?.hostUri?.split(':')[0] || 'localhost';
 export const API = process.env.EXPO_PUBLIC_API_URL || `http://${devHost}:4100`;
-const APP_TOKEN = process.env.EXPO_PUBLIC_APP_TOKEN;
 
-// A random id created on first launch; the server keys trips and conversations on it.
-let deviceId: Promise<string> | null = null;
-export function getDeviceId() {
-  deviceId ??= (async () => {
-    let id = await SecureStore.getItemAsync('deviceId');
-    if (!id) {
-      id = 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
-        const r = (Math.random() * 16) | 0;
-        return (c === 'x' ? r : (r & 0x3) | 0x8).toString(16);
-      });
-      await SecureStore.setItemAsync('deviceId', id);
-    }
-    return id;
-  })();
-  return deviceId;
+// The signed-in screen registers this so an expired or revoked sign-in sends you back to the login screen.
+let onUnauthorized = () => {};
+export const setUnauthorizedHandler = (fn: () => void) => (onUnauthorized = fn);
+
+export class ApiError extends Error {
+  constructor(message: string, public status: number) {
+    super(message);
+  }
 }
 
+// Every request carries the Cognito ID token (refreshed automatically when it's about to expire).
 export async function authHeaders(): Promise<Record<string, string>> {
-  const headers: Record<string, string> = { 'x-device-id': await getDeviceId() };
-  if (APP_TOKEN) headers['x-app-token'] = APP_TOKEN;
-  return headers;
+  const token = await getIdToken();
+  return token ? { Authorization: `Bearer ${token}` } : {};
 }
 
 export async function api<T = any>(path: string, { method = 'GET', body }: { method?: string; body?: unknown } = {}): Promise<T> {
@@ -37,10 +29,11 @@ export async function api<T = any>(path: string, { method = 'GET', body }: { met
   try {
     res = await fetch(`${API}/api${path}`, { method, headers, body: body !== undefined ? JSON.stringify(body) : undefined });
   } catch {
-    throw new Error(`Can't reach the Travel Buddy server (${API}).`);
+    throw new ApiError(`Can't reach the Travel Buddy server.`, 0);
   }
   const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data.error || `Request failed (${res.status})`);
+  if (res.status === 401 && headers.Authorization) onUnauthorized();
+  if (!res.ok) throw new ApiError(data.error || `Request failed (${res.status})`, res.status);
   return data as T;
 }
 

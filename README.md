@@ -22,6 +22,16 @@ In Expo Go you **hold the mic to talk** (the clip is transcribed by Amazon Trans
 The hands-free "travel buddy, ..." wake word needs on-device speech recognition, which only the standalone build has
 (`npx expo run:ios --configuration Release --device`; it updates itself from the same channel).
 
+## Accounts
+
+Sign up with an email and password, confirm the 6-digit code Cognito emails you, and you're in. Trips, routes and
+conversations belong to the account, so they survive reinstalls and follow you to another phone.
+Login, password reset ("Forgot password?") and account deletion (Me → Delete account, which removes every trip, file and
+conversation) are all in the app. Each stage has its own Cognito user pool (`travelbuddy-dev`, `travelbuddy-prod`).
+The app's Cognito calls go through the API (`/api/cognito`), and every other API call carries the Cognito ID token
+([backend/src/auth.ts](backend/src/auth.ts), [mobile/src/lib/cognito.ts](mobile/src/lib/cognito.ts)).
+Cognito's built-in email sender is limited to about 50 emails a day; connect Amazon SES to the user pool before inviting many people.
+
 ## Branches and deploys
 
 | Push to | Pipeline | API | App updates (Expo channel) |
@@ -34,7 +44,7 @@ type-checks and deploys the API to Lambda, then publishes the app's JavaScript w
 Changes to native code (new native modules, permissions, app.json plugins) need a new build, not just an update.
 
 Secrets live in SSM Parameter Store: `/travelbuddy/anthropic-key` (copied into the Lambdas by `deploy/bootstrap-aws.sh <stage>`),
-`/travelbuddy/<stage>/app-token` (generated; the API requires it and the app ships with it), `/travelbuddy/expo-token` (lets CodeBuild publish updates).
+`/travelbuddy/expo-token` (lets CodeBuild publish updates).
 Re-run `deploy/bootstrap-aws.sh dev|prod` after changing the Anthropic key or the infrastructure; it only creates what's missing.
 
 ## Run the API locally (optional)
@@ -76,5 +86,4 @@ Trips, GPS points, media records and the conversation live in one DynamoDB table
 - **Background:** with a trip recording, the standalone app keeps mapping the route while the phone is locked (needs "Always" location; iOS shows the blue location pill). Video and voice stop in the background; iOS doesn't allow the camera there. Expo Go can't run background location at all, so there the route pauses while the phone is locked.
 - **Video clips are silent.** The microphone is reserved for talking to Travel Buddy, and sharing it with the video recorder is unreliable on iOS.
 - **About 1 second of footage is lost** between 15-second clips while the camera restarts recording.
-- **No accounts.** A random device id identifies you, and the app token keeps casual strangers out (it ships inside the app, so it isn't a real secret). For real users, add Cognito the way the `dating` app does.
 - The upload queue lives in memory. Clips not yet uploaded when the app is killed stay on the phone's cache but won't be retried.

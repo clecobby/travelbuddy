@@ -89,7 +89,7 @@ const TOOLS: BetaToolUnion[] = [
 ];
 
 export type ChatInput = {
-  deviceId: string;
+  userId: string;
   text: string;
   localTime: string; // e.g. "Tue 17 Nov 2026, 14:05 (Europe/Lisbon)"
   localDate: string; // YYYY-MM-DD on the phone, used to start a fresh conversation each day
@@ -145,10 +145,9 @@ async function contextBlock(input: ChatInput, trip: Trip | undefined): Promise<s
 }
 
 export async function chat(input: ChatInput): Promise<{ reply: string; actions: Action[] }> {
-  const convoId = `${input.deviceId}:${input.localDate}`;
-  const history: BetaMessageParam[] = (await loadConversation(convoId)).map((m) => ({ role: m.role, content: JSON.parse(m.content) }));
+  const history: BetaMessageParam[] = (await loadConversation(input.userId, input.localDate)).map((m) => ({ role: m.role, content: JSON.parse(m.content) }));
 
-  const userContent: BetaContentBlockParam[] = [{ type: 'text', text: await contextBlock(input, await activeTrip(input.deviceId)) }];
+  const userContent: BetaContentBlockParam[] = [{ type: 'text', text: await contextBlock(input, await activeTrip(input.userId)) }];
   if (input.image) userContent.push({ type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: input.image } });
   userContent.push({ type: 'text', text: input.arrived ? `[Arrived] ${input.text}` : input.text });
 
@@ -197,14 +196,14 @@ export async function chat(input: ChatInput): Promise<{ reply: string; actions: 
   // The last assistant message carries the spoken reply so the trip log can show the conversation.
   const lastAssistant = turn.findLastIndex((t) => t.msg.role === 'assistant');
   if (lastAssistant >= 0) turn[lastAssistant].spoken = reply;
-  await appendMessages(input.deviceId, convoId, turn.map((t) => ({ role: t.msg.role, content: t.msg.content, spoken: t.spoken })));
+  await appendMessages(input.userId, input.localDate, turn.map((t) => ({ role: t.msg.role, content: t.msg.content, spoken: t.spoken })));
 
   return { reply, actions };
 }
 
 async function runTool(name: string, rawInput: unknown, chatInput: ChatInput, actions: Action[]) {
   const input = (rawInput ?? {}) as { title?: unknown; radius_km?: unknown };
-  const deviceId = chatInput.deviceId;
+  const userId = chatInput.userId;
   switch (name) {
     case 'nearby_places': {
       const loc = chatInput.location;
@@ -216,19 +215,19 @@ async function runTool(name: string, rawInput: unknown, chatInput: ChatInput, ac
       return typeof input.title === 'string' && input.title.trim() ? placeSummary(input.title.trim()) : { error: 'Missing title' };
     case 'start_trip_recording': {
       const title = typeof input.title === 'string' && input.title.trim() ? input.title.trim().slice(0, 80) : 'My trip';
-      const trip = await createTrip(deviceId, title);
+      const trip = await createTrip(userId, title);
       actions.push({ type: 'trip_started', trip });
       return { ok: true, trip: title, note: 'Camera video, snapshots and GPS are now being recorded.' };
     }
     case 'stop_trip_recording': {
-      const current = await activeTrip(deviceId);
+      const current = await activeTrip(userId);
       if (!current) return { ok: false, note: 'No trip is recording.' };
-      const trip = (await endTrip(deviceId, current.id))!;
+      const trip = (await endTrip(userId, current.id))!;
       actions.push({ type: 'trip_stopped', trip });
       return { ok: true, ...(await tripStats(trip)) };
     }
     case 'trip_stats': {
-      const current = await activeTrip(deviceId);
+      const current = await activeTrip(userId);
       return current ? await tripStats(current) : { recording: false, note: 'No trip is recording right now.' };
     }
     default:
